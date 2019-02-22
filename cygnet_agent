@@ -1,0 +1,203 @@
+#!/usr/bin/env python
+
+"""
+JSON syntax:
+{
+    "command": "add",
+    "prefix": "5.3.0.0/24",
+    "entries": [
+        {
+            "nexthop": "172.16.130.1",
+            "label": [30, 31, 32]
+        },
+        {
+            "nexthop": "172.16.130.2",
+            "label": [40, 41, 42]
+        }
+    ]
+}
+"""
+
+import json
+import re
+import socket
+import sys
+import time
+
+import eossdk
+
+MAX_BUF_SIZE = 4096
+
+class ServerHandler(eossdk.FdHandler):
+    """Wrapper for FdHandler that accepts multiple client connetions on a TCP
+    socket"""
+    def __init__(self, address, backlog=5):
+
+        # keep track fo client connections
+        self._connections = []
+        self._server = None
+
+        eossdk.FdHandler.__init__(self)
+        self.acl_mgr = sdk.get_acl_mgr()
+
+        self.serve(address, backlog)
+
+    # def on_receive(self, data):
+    #     pass
+
+    # def on_connection(self, fd, addr):
+    #     pass
+
+    def on_request(self, fd):
+        """trigger when a request is received on a client connection.  users
+        should override this method to handle the data"""
+        pass
+
+    def serve(self, address, backlog):
+
+        self.tracer.trace0("Opening socket server on %s.%d" % address)
+
+        self._server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+        # reuse this socket if in TIME_WAIT state
+        self._server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+        # set socket to non-blocking. Watch readble will let us know when data
+        # is available
+        self._server.setblocking(0)
+
+        self._server.bind(address)
+        self._server.listen(backlog)
+
+        self.watch_readable(self._server.fileno(), True);
+
+    def _is_connection_allowed(self, src_addr):
+        """Test connection against configure service ACL
+
+        Example:
+
+        ip access-list standard MY_AGENT_ACL
+            10 permit 192.168.0.0/16
+
+        daemon MyAgent
+            exec /path/to/myagent
+            ip access-group MY_AGENT_ACL [in]
+            no shutdown
+
+        """
+
+        src_ip, src_port = src_addr
+        dst_ip, dst_port = self._server.getsockname()
+
+        src_ip = eossdk.IpAddr(src_ip)
+        dst_ip = eossdk.IpAddr(dst_ip)
+
+        if not self.acl_mgr.stream_allowed(src_ip, dst_ip, 0, src_port,
+                                           dst_port):
+            return False
+
+        return True
+
+    def on_readable(self, fd):
+        """React to events on watched sockets. This method handles both new
+        connections and data received on existing ones"""
+
+        if fd == self._server.fileno():
+            new_fd, src_addr = self._server.accept()
+
+            if not self._is_connection_allowed(src_addr):
+                self.tracer.trace1(
+                    "Connection from %s blocked by ACL" % src_addr[0])
+                new_fd.close()
+                return
+
+            new_fd.setblocking(0)
+
+            # self.on_connection(new_fd, src_addr)
+
+            self._connections.append(new_fd)
+            self.watch_readable(new_fd.fileno(), True)
+        else:
+            readable = [f for f in self._connections if f.fileno() == fd][0]
+
+            if not readable:
+                return
+
+            data = readable.recv(MAX_BUF_SIZE)
+
+            if not data:
+                self.watch_readable(fd, False)
+                readable.shutdown(2)
+                readable.close()
+                self._connections.remove(readable)
+                return
+
+            response = self.on_request(data)
+
+            if response:
+                readable.send(response)
+
+class CygnetAgent(eossdk.AgentHandler, ServerHandler):
+
+    def __init__(self, sdk):
+        self.tracer = eossdk.Tracer("CygnetAgent")
+
+        self.agent_mgr = sdk.get_agent_mgr()
+        self.nhg_mgr = sdk.get_nexthop_group_mgr()
+        self.ip_route_mgr = sdk.get_ip_route_mgr()
+
+        eossdk.AgentHandler.__init__(self, self.agent_mgr)
+        ServerHandler.__init__(self, ("0.0.0.0", 6667))
+
+        self.tracer.trace0("cygnet agent constructed...")
+
+    def _parse_command(self, data):
+        pass
+
+    def on_agent_enabled(self, enabled):
+        if enabled == False:
+            self.agent_mgr.agent_shutdown_complete_is(True)
+
+    def on_initialized(self):
+        self.tracer.trace0("cygnet agent initialized...")
+
+    def on_connection(self, fd, addr):
+        self.tracer.trace0("New connection on %s" % str(fd))
+
+    def on_request(self, data):
+
+        data = json.loads(data)
+
+        self.tracer.trace0("RECEIVED: %s" % data)
+
+        name = "CYGNET_" + re.sub(r"[\.\/]", "_", data["prefix"])
+
+        self.tracer.trace0("CREATING NHG: %s" % str(name))
+
+        nhg = eossdk.NexthopGroup(str(name), eossdk.NEXTHOP_GROUP_MPLS)
+
+        i = 0
+        for entry in data["entries"]:
+            labels = tuple([eossdk.MplsLabel(l) for l in entry["label"]])
+            action = eossdk.NexthopGroupMplsAction(eossdk.MPLS_ACTION_PUSH, labels)
+            nhe = eossdk.NexthopGroupEntry(eossdk.IpAddr(str(entry["nexthop"])))
+            nhe.mpls_action_is(action)
+            nhg.nexthop_set(i, nhe)
+            i += 1
+
+        self.nhg_mgr.nexthop_group_set(nhg)
+
+        prefix = eossdk.IpPrefix(str(data["prefix"]))
+
+        route_key = eossdk.IpRouteKey(prefix)
+        route = eossdk.IpRoute(route_key)
+        via = eossdk.IpRouteVia(route_key)
+        via.nexthop_group_is(str(name))
+
+        self.ip_route_mgr.ip_route_set(route)
+        self.ip_route_mgr.ip_route_via_set(via)
+
+if __name__ == "__main__":
+    sdk = eossdk.Sdk()
+    _ = CygnetAgent(sdk)
+    sdk.main_loop(sys.argv)
