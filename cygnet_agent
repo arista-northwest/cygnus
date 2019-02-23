@@ -2,9 +2,14 @@
 
 """
 JSON syntax:
+
+Create or update an existing a nexthop group
+
+```
 {
     "command": "add",
-    "prefix": "5.3.0.0/24",
+    "type": "nexthop-group"
+    "name": "CYGNUS_NHG_1",
     "entries": [
         {
             "nexthop": "172.16.130.1",
@@ -16,6 +21,38 @@ JSON syntax:
         }
     ]
 }
+```
+
+Delete a Nexthop group, will fail if any vias exist
+
+```
+{
+    "command": "del",
+    "type": "nexthop-group"
+    "name": "CYGNUS_NHG_1"
+}
+```
+
+
+
+```
+{
+    "command": "add",
+    "type": "route",
+    "prefix": "5.3.0.0/24",
+    "via": "CYGNUS_NHG_1"
+}
+```
+
+```
+{
+    "command": "del",
+    "type": "route",
+    "prefix": "5.3.0.0/24",
+    "via": "CYGNUS_NHG_1"
+}
+```
+
 """
 
 import json
