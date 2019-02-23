@@ -1,4 +1,4 @@
-bin=/mnt/flash/cygnet_agent
+bin=/persist/local/cygnus_agent
 [ ${bin%.*} == $bin ] || echo "Error: remove dots from binary name"
 name=$(basename $bin)
 dest=/usr/lib/SysdbMountProfiles/$name

@@ -1,13 +1,16 @@
 #!/usr/bin/env python
 
 """
+set nexthop-group name CYGNUS_NHG_1 entry 0 nexthop 172.16.130.1 label 30,31,32
+set nexthop-group name CYGNUS_NHG_1 entry 1 nexthop 172.16.130.2 label 40,41,42
+del nexthop-group name CYGNUS_NHG_1
 JSON syntax:
 
 Create or update an existing a nexthop group
 
 ```
 {
-    "command": "add",
+    "command": "set",
     "type": "nexthop-group"
     "name": "CYGNUS_NHG_1",
     "entries": [
@@ -37,7 +40,7 @@ Delete a Nexthop group, will fail if any vias exist
 
 ```
 {
-    "command": "add",
+    "command": "set",
     "type": "route",
     "prefix": "5.3.0.0/24",
     "via": "CYGNUS_NHG_1"

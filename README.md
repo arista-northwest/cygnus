@@ -1,10 +1,10 @@
-# CYGNET
+# CYGNUS
 
 ```
 configure
-daemon CygnetAgent
-  exec /persist/local/cygnet_agent
+daemon CygnusAgent
+  exec /persist/local/cygnus_agent
   exit
 
-trace cygnet_agent-CygnetAgent setting CygnetAgent/*
+trace cygnus_agent-CygnusAgent setting CygnusAgent/*
 ```
