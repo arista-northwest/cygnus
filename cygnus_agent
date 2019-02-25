@@ -1,61 +1,16 @@
 #!/usr/bin/env python
 
 """
+## Command-style:
+
+```
 set nexthop-group name CYGNUS_NHG_1 entry 0 nexthop 172.16.130.1 label 30,31,32
 set nexthop-group name CYGNUS_NHG_1 entry 1 nexthop 172.16.130.2 label 40,41,42
+set route prefix 5.3.0.0/24 via CYGNUS_NHG_1
+del route prefix 5.3.0.0/24 via CYGNUS_NHG_1
+del route prefix 5.3.0.0/24
 del nexthop-group name CYGNUS_NHG_1
-JSON syntax:
-
-Create or update an existing a nexthop group
-
 ```
-{
-    "command": "set",
-    "type": "nexthop-group"
-    "name": "CYGNUS_NHG_1",
-    "entries": [
-        {
-            "nexthop": "172.16.130.1",
-            "label": [30, 31, 32]
-        },
-        {
-            "nexthop": "172.16.130.2",
-            "label": [40, 41, 42]
-        }
-    ]
-}
-```
-
-Delete a Nexthop group, will fail if any vias exist
-
-```
-{
-    "command": "del",
-    "type": "nexthop-group"
-    "name": "CYGNUS_NHG_1"
-}
-```
-
-
-
-```
-{
-    "command": "set",
-    "type": "route",
-    "prefix": "5.3.0.0/24",
-    "via": "CYGNUS_NHG_1"
-}
-```
-
-```
-{
-    "command": "del",
-    "type": "route",
-    "prefix": "5.3.0.0/24",
-    "via": "CYGNUS_NHG_1"
-}
-```
-
 """
 
 import json
@@ -81,12 +36,6 @@ class ServerHandler(eossdk.FdHandler):
         self.acl_mgr = sdk.get_acl_mgr()
 
         self.serve(address, backlog)
-
-    # def on_receive(self, data):
-    #     pass
-
-    # def on_connection(self, fd, addr):
-    #     pass
 
     def on_request(self, fd):
         """trigger when a request is received on a client connection.  users
@@ -153,8 +102,6 @@ class ServerHandler(eossdk.FdHandler):
 
             new_fd.setblocking(0)
 
-            # self.on_connection(new_fd, src_addr)
-
             self._connections.append(new_fd)
             self.watch_readable(new_fd.fileno(), True)
         else:
@@ -177,10 +124,10 @@ class ServerHandler(eossdk.FdHandler):
             if response:
                 readable.send(response)
 
-class CygnetAgent(eossdk.AgentHandler, ServerHandler):
+class CygnusAgent(eossdk.AgentHandler, ServerHandler):
 
     def __init__(self, sdk):
-        self.tracer = eossdk.Tracer("CygnetAgent")
+        self.tracer = eossdk.Tracer("CygnusAgent")
 
         self.agent_mgr = sdk.get_agent_mgr()
         self.nhg_mgr = sdk.get_nexthop_group_mgr()
@@ -189,7 +136,7 @@ class CygnetAgent(eossdk.AgentHandler, ServerHandler):
         eossdk.AgentHandler.__init__(self, self.agent_mgr)
         ServerHandler.__init__(self, ("0.0.0.0", 6667))
 
-        self.tracer.trace0("cygnet agent constructed...")
+        self.tracer.trace0("cygnus agent constructed...")
 
     def _parse_command(self, data):
         pass
@@ -199,25 +146,30 @@ class CygnetAgent(eossdk.AgentHandler, ServerHandler):
             self.agent_mgr.agent_shutdown_complete_is(True)
 
     def on_initialized(self):
-        self.tracer.trace0("cygnet agent initialized...")
+        self.tracer.trace0("cygnus agent initialized...")
 
-    def on_connection(self, fd, addr):
-        self.tracer.trace0("New connection on %s" % str(fd))
-
-    def on_request(self, data):
-
-        data = json.loads(data)
-
-        self.tracer.trace0("RECEIVED: %s" % data)
-
-        name = "CYGNET_" + re.sub(r"[\.\/]", "_", data["prefix"])
-
-        self.tracer.trace0("CREATING NHG: %s" % str(name))
-
-        nhg = eossdk.NexthopGroup(str(name), eossdk.NEXTHOP_GROUP_MPLS)
+    def _set_nexthop_group(self, name, entries=[]):
+        """
+        {
+            "command": "set",
+            "type": "nexthop-group"
+            "name": "CYGNUS_NHG_1",
+            "entries": [
+                {
+                    "nexthop": "172.16.130.1",
+                    "label": [30, 31, 32]
+                },
+                {
+                    "nexthop": "172.16.130.2",
+                    "label": [40, 41, 42]
+                }
+            ]
+        }
+        """
+        nhg = eossdk.NexthopGroup(name, eossdk.NEXTHOP_GROUP_MPLS)
 
         i = 0
-        for entry in data["entries"]:
+        for entry in entries:
             labels = tuple([eossdk.MplsLabel(l) for l in entry["label"]])
             action = eossdk.NexthopGroupMplsAction(eossdk.MPLS_ACTION_PUSH, labels)
             nhe = eossdk.NexthopGroupEntry(eossdk.IpAddr(str(entry["nexthop"])))
@@ -227,17 +179,78 @@ class CygnetAgent(eossdk.AgentHandler, ServerHandler):
 
         self.nhg_mgr.nexthop_group_set(nhg)
 
-        prefix = eossdk.IpPrefix(str(data["prefix"]))
+    def _del_nexthop_group(self, name):
+        """{
+            "command": "del",
+            "type": "nexthop-group"
+            "name": "CYGNUS_NHG_1"
+        }"""
+        is_active = self.nhg_mgr.active(name)
 
+        if not is_active:
+            self.tracer.trace0("DELETING: Nexthop-group '%s'" % name)
+            self.nhg_mgr.nexthop_group_del(name)
+        else:
+            self.tracer.trace0("NOT-DELETING: NHG '%s' is still active" % name)
+
+    def _set_route(self, prefix, nexthop_group):
+        """{
+            "command": "set",
+            "type": "route",
+            "prefix": "5.3.0.0/24",
+            "nexthop_group": "CYGNUS_NHG_1"
+        }"""
+        prefix = eossdk.IpPrefix(str(prefix))
         route_key = eossdk.IpRouteKey(prefix)
         route = eossdk.IpRoute(route_key)
         via = eossdk.IpRouteVia(route_key)
-        via.nexthop_group_is(str(name))
+        via.nexthop_group_is(str(nexthop_group))
 
         self.ip_route_mgr.ip_route_set(route)
         self.ip_route_mgr.ip_route_via_set(via)
 
+    def _del_route(self, prefix, nexthop_group=None):
+        """{
+            "command": "del",
+            "type": "route",
+            "prefix": "5.3.0.0/24",
+            "nexthop_group": "CYGNUS_NHG_1" // optional
+        }"""
+        prefix = eossdk.IpPrefix(str(prefix))
+        route_key = eossdk.IpRouteKey(prefix)
+        route = eossdk.IpRoute(route_key)
+
+        if nexthop_group:
+            via = eossdk.IpRouteVia(route_key)
+            via.nexthop_group_is(str(nexthop_group))
+            self.ip_route_mgr.ip_route_via_del(via)
+        else:
+            self.ip_route_mgr.ip_route_del(route_key)
+
+    def on_request(self, data):
+
+        data = json.loads(data)
+
+        action = data["command"]
+        type = data["type"]
+
+        self.tracer.trace0("RECEIVED: %s" % data)
+
+        if type == "nexthop-group":
+            name = str(data["name"])
+            if action == "set":
+                self._set_nexthop_group(name, data.get("entries", []))
+            elif action == "del":
+                self._del_nexthop_group(name)
+        elif type == "route":
+            prefix = str(data["prefix"])
+            nexthop_group = str(data.get("nexthop_group", ""))
+            if action == "set":
+                self._set_route(prefix, nexthop_group)
+            elif action == "del":
+                self._del_route(prefix, nexthop_group)
+
 if __name__ == "__main__":
     sdk = eossdk.Sdk()
-    _ = CygnetAgent(sdk)
+    _ = CygnusAgent(sdk)
     sdk.main_loop(sys.argv)
