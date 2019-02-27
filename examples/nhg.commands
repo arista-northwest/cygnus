@@ -1,0 +1,5 @@
+set nexthop-group name CYGNUS_NHG_1 entry 0 nexthop 200.1.1.13 label [ 1000 ]
+set route prefix 3.1.4.0/24 nexthop_group CYGNUS_NHG_1
+del route prefix 3.1.4.0/24 nexthop_group CYGNUS_NHG_1
+del route prefix 3.1.4.0/24
+del nexthop-group name CYGNUS_NHG_1

@@ -1,6 +1,0 @@
-{
-    "command": "del",
-    "type": "route",
-    "prefix": "192.168.99.3/32",
-    "nexthop_group": "CYGNUS_NHG_1"
-}

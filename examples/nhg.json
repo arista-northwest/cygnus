@@ -1,0 +1,9 @@
+{ "command": "set", "type": "nexthop-group", "name": "CYGNUS_NHG_1", "entries": [ { "nexthop": "200.1.1.13", "label": [1000] } ] }
+
+{ "command": "set", "type": "route", "prefix": "3.1.4.0/24", "nexthop_group": "CYGNUS_NHG_1" }
+
+{ "command": "del", "type": "route", "prefix": "3.1.4.0/24", "nexthop_group": "CYGNUS_NHG_1" }
+
+{ "command": "del", "type": "route", "prefix": "3.1.4.0/24" }
+
+{ "command": "del", "type": "nexthop-group", "name": "CYGNUS_NHG_1" }
