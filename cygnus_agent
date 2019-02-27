@@ -23,30 +23,48 @@ import eossdk
 
 MAX_BUF_SIZE = 4096
 
+def byteify(input):
+    if isinstance(input, dict):
+        return {byteify(key): byteify(value)
+                for key, value in input.iteritems()}
+    elif isinstance(input, list):
+        return [byteify(element) for element in input]
+    elif isinstance(input, unicode):
+        return input.encode('utf-8')
+    else:
+        return input
+
 class ServerHandler(eossdk.FdHandler):
     """Wrapper for FdHandler that accepts multiple client connetions on a TCP
     socket"""
     def __init__(self, address, backlog=5):
 
         # keep track fo client connections
+        self._address = address
+        self._backlog = backlog
         self._connections = []
         self._server = None
 
         eossdk.FdHandler.__init__(self)
         self.acl_mgr = sdk.get_acl_mgr()
+        self.vrf_mgr = sdk.get_vrf_mgr()
 
         self.serve(address, backlog)
 
-    def on_request(self, fd):
+    def on_request(self, fd, data):
         """trigger when a request is received on a client connection.  users
         should override this method to handle the data"""
         pass
 
+    def on_connection(self, fd, addr):
+        pass
+
     def serve(self, address, backlog):
 
-        self.tracer.trace0("Opening socket server on %s.%d" % address)
+        self.tracer.trace0("Opening socket server on %s.%d" % self._address)
 
-        self._server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        #fd = self.vrf_mgr.socket_at(socket.AF_INET, socket.SOCK_STREAM, 0, vrf="management")
+        self._server = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
 
         # reuse this socket if in TIME_WAIT state
         self._server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -55,8 +73,8 @@ class ServerHandler(eossdk.FdHandler):
         # is available
         self._server.setblocking(0)
 
-        self._server.bind(address)
-        self._server.listen(backlog)
+        self._server.bind(self._address)
+        self._server.listen(self._backlog)
 
         self.watch_readable(self._server.fileno(), True);
 
@@ -103,6 +121,12 @@ class ServerHandler(eossdk.FdHandler):
             new_fd.setblocking(0)
 
             self._connections.append(new_fd)
+
+            response = self.on_connection(new_fd, src_addr)
+
+            if response:
+                new_fd.send(response)
+
             self.watch_readable(new_fd.fileno(), True)
         else:
             readable = [f for f in self._connections if f.fileno() == fd][0]
@@ -119,7 +143,7 @@ class ServerHandler(eossdk.FdHandler):
                 self._connections.remove(readable)
                 return
 
-            response = self.on_request(data)
+            response = self.on_request(readable, data)
 
             if response:
                 readable.send(response)
@@ -135,18 +159,6 @@ class CygnusAgent(eossdk.AgentHandler, ServerHandler):
 
         eossdk.AgentHandler.__init__(self, self.agent_mgr)
         ServerHandler.__init__(self, ("0.0.0.0", 6667))
-
-        self.tracer.trace0("cygnus agent constructed...")
-
-    def _parse_command(self, data):
-        pass
-
-    def on_agent_enabled(self, enabled):
-        if enabled == False:
-            self.agent_mgr.agent_shutdown_complete_is(True)
-
-    def on_initialized(self):
-        self.tracer.trace0("cygnus agent initialized...")
 
     def _set_nexthop_group(self, name, entries=[]):
         """
@@ -168,14 +180,15 @@ class CygnusAgent(eossdk.AgentHandler, ServerHandler):
         """
         nhg = eossdk.NexthopGroup(name, eossdk.NEXTHOP_GROUP_MPLS)
 
-        i = 0
-        for entry in entries:
+        for index, entry in enumerate(entries):
             labels = tuple([eossdk.MplsLabel(l) for l in entry["label"]])
-            action = eossdk.NexthopGroupMplsAction(eossdk.MPLS_ACTION_PUSH, labels)
-            nhe = eossdk.NexthopGroupEntry(eossdk.IpAddr(str(entry["nexthop"])))
+            action = eossdk.NexthopGroupMplsAction(
+                eossdk.MPLS_ACTION_PUSH,
+                labels
+            )
+            nhe = eossdk.NexthopGroupEntry(eossdk.IpAddr(entry["nexthop"]))
             nhe.mpls_action_is(action)
-            nhg.nexthop_set(i, nhe)
-            i += 1
+            nhg.nexthop_set(index, nhe)
 
         self.nhg_mgr.nexthop_group_set(nhg)
 
@@ -227,28 +240,44 @@ class CygnusAgent(eossdk.AgentHandler, ServerHandler):
         else:
             self.ip_route_mgr.ip_route_del(route_key)
 
-    def on_request(self, data):
 
-        data = json.loads(data)
+    def on_agent_enabled(self, enabled):
+        if enabled == False:
+            self.agent_mgr.agent_shutdown_complete_is(True)
+
+    def on_initialized(self):
+        self.tracer.trace0("cygnus agent initialized...")
+
+    def on_connection(self, fd, addr):
+        fd.send("Hello %s, welcome to Cygnus.\n" % addr[0])
+
+    def on_request(self, fd, data):
+
+        if not re.search(r"\w+", data):
+            return
+
+        try:
+            data = byteify(json.loads(data))
+        except ValueError as exc:
+            self.tracer.trace0("Data on is not valid JSON")
+            fd.send("ERROR: Not valid JSON\n")
+            return
+
+        if "command" not in data:
+            fd.send("ERROR: No command specified\n")
+            return
+
+        if "type" not in data:
+            fd.send("ERROR: No type specified\n")
+            return
 
         action = data["command"]
-        type = data["type"]
+        type = re.sub(r"\-", "_", data["type"])
+        params = {k:v for k,v in data.items() if k not in ["command", "type"]}
 
-        self.tracer.trace0("RECEIVED: %s" % data)
+        func = getattr(self, "_%s_%s" % (action, type))
 
-        if type == "nexthop-group":
-            name = str(data["name"])
-            if action == "set":
-                self._set_nexthop_group(name, data.get("entries", []))
-            elif action == "del":
-                self._del_nexthop_group(name)
-        elif type == "route":
-            prefix = str(data["prefix"])
-            nexthop_group = str(data.get("nexthop_group", ""))
-            if action == "set":
-                self._set_route(prefix, nexthop_group)
-            elif action == "del":
-                self._del_route(prefix, nexthop_group)
+        func(**params)
 
 if __name__ == "__main__":
     sdk = eossdk.Sdk()
