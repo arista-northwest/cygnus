@@ -1,0 +1,32 @@
+#!/usr/bin/python2
+import argparse
+import sys
+import eossdk
+from cygnus.agent import CygnusAgent
+
+def main():
+    parser = argparse.ArgumentParser(description="EosSdk NHG Agent")
+
+    parser.add_argument("--address", default="0.0.0.0",
+        help="Listen on address (default: 0.0.0.0)")
+
+    parser.add_argument("--port", default=6667, type=int,
+        help="Listen on port (default: 6667)")
+
+    parser.add_argument("--vrf", default="default",
+        help="specify VRF to open socket in")
+
+    parser.add_argument("--backlog", default=5, type=int,
+        help="specifies the number of pending connections the queue will hold")
+
+    args = parser.parse_args()
+    sdk = eossdk.Sdk()
+    _ = CygnusAgent(sdk,
+        address=(args.address, args.port),
+        backlog=args.backlog,
+        vrf=args.vrf
+    )
+    sdk.main_loop(sys.argv)
+
+if __name__ == "__main__":
+    main()
