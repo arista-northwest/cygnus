@@ -16,7 +16,7 @@ from cygnus.util import byteify
 
 class CygnusAgent(eossdk.AgentHandler, ServerHandler):
 
-    def __init__(self, sdk, address=("0.0.0.0", 6667), backlog=5, vrf="default"):
+    def __init__(self, sdk, address=("0.0.0.0", 50001), backlog=5, vrf="default"):
         self.tracer = eossdk.Tracer("Cygnus")
 
         self.agent_mgr = sdk.get_agent_mgr()
