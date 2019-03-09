@@ -12,8 +12,12 @@ docker run --rm -it -v $(pwd):/project rpmbuild python setup.py bdist_rpm
 ## Deploy
 
 ```
-scp user[:password]@<host>:/path/to/Cygnus-<version>.rpm extension:
-extension Cygnus-<version>.rpm
+scp dist/Cygnus-<version>.noarch.rpm admin@yo630:/mnt/flash/Cygnus-latest.rpm
+# delete old extension if needed and be sure to shutdown the agent before
+# upgrading
+no extension Cygnus-latest.rpm
+copy flash:Cygnus-latest.rpm extension:
+extension Cygnus-latest.rpm
 copy installed-extensions boot-extensions
 
 configure
