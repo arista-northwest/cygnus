@@ -3,16 +3,17 @@
 ## Build
 
 ```
-$ python setup.py bdist_rpm
+git clone https://github.com/arista-northwest/cygnus.git
+cd cygnus
+build -t rpmbuild https://github.com/arista-northwest/docker-rpmbuild.git
+docker run --rm -it -v $(pwd):/project rpmbuild python setup.py bdist_rpm
 ```
 
 ## Deploy
 
-On switch:
-
 ```
-scp user[:password]@<host>:/path/to/Cygnus-<version>.noarch.rpm extension:
-extension Cygnus-<version>.noarch.rpm
+scp user[:password]@<host>:/path/to/Cygnus-<version>.rpm extension:
+extension Cygnus-<version>.rpm
 copy installed-extensions boot-extensions
 
 configure
@@ -26,4 +27,30 @@ daemon Cygnus
    no shutdown
 
 trace Cygnus-Cygnus setting Cygnus/*
+```
+
+### Connecting.
+
+```
+$ telnet yo630 50001
+Trying 172.24.70.162...
+Connected to yo630.sjc.aristanetworks.com.
+Escape character is '^]'.
+Hello 10.95.79.114, welcome to Cygnus.
+```
+
+### Example commands ():
+
+```
+{ "command": "set", "type": "nexthop-group", "name": "CYGNUS_TEST_1", "entries": [ { "nexthop": "169.254.0.33", "label": [1000] } ]}
+{ "command": "set", "type": "route", "prefix": "200.0.0.0/24", "nexthop_group": "CYGNUS_TEST_1" }
+{ "command": "del", "type": "route", "prefix": "200.0.0.0/24", "nexthop_group": "CYGNUS_TEST_1" }
+{ "command": "del", "type": "route", "prefix": "200.0.0.0/24" }
+{ "command": "del", "type": "nexthop-group", "name": "CYGNUS_TEST_1" }
+```
+
+### Scripting example commands, exmaple selects only 'set' commands:
+
+```
+IFS=$'\n' && for l in `cat examples/nhg.json | grep set`; do echo $l | ncat yo630 50001; done
 ```
