@@ -5,7 +5,7 @@
 ```
 git clone https://github.com/arista-northwest/cygnus.git
 cd cygnus
-build -t rpmbuild https://github.com/arista-northwest/docker-rpmbuild.git
+docker build -t rpmbuild https://github.com/arista-northwest/docker-rpmbuild.git
 docker run --rm -it -v $(pwd):/project rpmbuild python setup.py bdist_rpm
 ```
 
