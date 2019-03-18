@@ -10,7 +10,7 @@ def main():
     parser.add_argument("--address", default="0.0.0.0",
         help="Listen on address (default: 0.0.0.0)")
 
-    parser.add_argument("--port", default=6667, type=int,
+    parser.add_argument("--port", default=50001, type=int,
         help="Listen on port (default: 6667)")
 
     parser.add_argument("--vrf", default="default",
