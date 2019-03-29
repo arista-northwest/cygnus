@@ -1,7 +1,5 @@
 #!/usr/bin/env python
 
-"""
-"""
 from __future__ import print_function
 import json
 import re
@@ -18,6 +16,8 @@ class CygnusAgent(eossdk.AgentHandler, ServerHandler):
 
     def __init__(self, sdk, address=("0.0.0.0", 50001), backlog=5, vrf="default"):
         self.tracer = eossdk.Tracer("Cygnus")
+
+        self._buffer = None
 
         self.agent_mgr = sdk.get_agent_mgr()
         self.nhg_mgr = sdk.get_nexthop_group_mgr()
@@ -127,28 +127,46 @@ class CygnusAgent(eossdk.AgentHandler, ServerHandler):
 
     def on_request(self, fd, data):
 
+        #self.tracer.trace0("Got data %s" % data)
+
         if not re.search(r"\w+", data):
             return
 
-        try:
-            data = byteify(json.loads(data))
-        except ValueError as exc:
-            self.tracer.trace0("Data on is not valid JSON")
-            fd.send("ERROR: Not valid JSON\n")
-            return
+        lines = data.splitlines(True)
 
-        if "command" not in data:
-            fd.send("ERROR: No command specified\n")
-            return
+        if self._buffer:
+            lines[0] = self._buffer + lines[0]
+            self._buffer = None
 
-        if "type" not in data:
-            fd.send("ERROR: No type specified\n")
-            return
+        if not re.search(r"[\r\n]+$", lines[-1]):
+            self._buffer = lines.pop()
 
-        action = data["command"]
-        type = re.sub(r"\-", "_", data["type"])
-        params = {k:v for k,v in data.items() if k not in ["command", "type"]}
+        for line in lines:
+            line = line.strip()
 
-        func = getattr(self, "_%s_%s" % (action, type))
+            if not line:
+                continue
 
-        func(**params)
+            try:
+                self.tracer.trace0("Loading: %s" % line)
+                loaded = byteify(json.loads(line))
+            except ValueError as exc:
+                self.tracer.trace0("Data on %d is not valid JSON" % fd.fileno())
+                fd.send("ERROR: '%s' is not valid JSON\n" % line)
+                continue
+
+            if "command" not in loaded:
+                fd.send("ERROR: No command specified\n")
+                return
+
+            if "type" not in loaded:
+                fd.send("ERROR: No type specified\n")
+                return
+
+            action = loaded["command"]
+            type = re.sub(r"\-", "_", loaded["type"])
+            params = {k:v for k,v in loaded.items() if k not in ["command", "type"]}
+
+            func = getattr(self, "_%s_%s" % (action, type))
+
+            func(**params)
