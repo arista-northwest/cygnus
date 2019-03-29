@@ -53,7 +53,7 @@ Hello 10.95.79.114, welcome to Cygnus.
 { "command": "del", "type": "nexthop-group", "name": "CYGNUS_TEST_1" }
 ```
 
-### Scripting example commands, exmaple selects only 'set' commands:
+### Scripting example commands, example selects only 'set' commands:
 
 ```
 IFS=$'\n' && for l in `cat examples/nhg.json | grep set`; do echo $l | ncat yo630 50001; done
