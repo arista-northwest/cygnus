@@ -56,5 +56,5 @@ Hello 10.95.79.114, welcome to Cygnus.
 ### Scripting example commands, example selects only 'set' commands:
 
 ```
-IFS=$'\n' && for l in `cat examples/nhg.json | grep set`; do echo $l | ncat yo630 50001; done
+cat examples/nhg.json | grep set | ncat yo630 50001
 ```
