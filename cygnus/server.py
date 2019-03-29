@@ -5,7 +5,7 @@
 import socket
 import eossdk
 
-MAX_BUF_SIZE = 4096
+MAX_BUF_SIZE = 1024 # 4096
 
 class ServerHandler(eossdk.FdHandler):
     """Wrapper for FdHandler that accepts multiple client connetions on a TCP
@@ -22,8 +22,6 @@ class ServerHandler(eossdk.FdHandler):
         eossdk.FdHandler.__init__(self)
         self.acl_mgr = sdk.get_acl_mgr()
         self.vrf_mgr = sdk.get_vrf_mgr()
-
-        #self.serve(address, backlog)
 
     def on_request(self, fd, data):
         """trigger when a request is received on a client connection.  users
@@ -109,18 +107,27 @@ class ServerHandler(eossdk.FdHandler):
 
             self.watch_readable(new_fd.fileno(), True)
         else:
+            data = None
             readable = [f for f in self._connections if f.fileno() == fd][0]
 
             if not readable:
                 return
 
-            data = readable.recv(MAX_BUF_SIZE)
+            self.tracer.trace0("receiving data from %d" % readable.fileno())
+
+            try:
+                data = readable.recv(MAX_BUF_SIZE)
+            except socket.error as exc:
+                self.tracer.trace0("Socket error: %s" % repr(exc))
+                self.watch_readable(fd, False)
+                self._connections.remove(readable)
+                return
 
             if not data:
                 self.tracer.trace0("closing connection on %d" % fd)
-                self.watch_readable(fd, False)
                 readable.shutdown(2)
                 readable.close()
+                self.watch_readable(fd, False)
                 self._connections.remove(readable)
                 return
 
